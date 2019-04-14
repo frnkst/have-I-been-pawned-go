@@ -14,33 +14,45 @@ import (
 )
 
 func main() {
+	// Secure password prompt (https://www.mycodesmells.com/post/reading-password-input-in-go)
 	fmt.Println("Enter password to check: ")
-	bytePassword, _ := terminal.ReadPassword(int(syscall.Stdin))
+	userPassword, _ := terminal.ReadPassword(int(syscall.Stdin))
 	fmt.Println()
 
-	h := sha1.New()
-	h.Write(bytePassword)
-	bs := h.Sum(nil)
-	hexHash := strings.ToUpper(hex.EncodeToString(bs))
+	// Create sha1 hash in hex
+	hash := sha1.New()
+	hash.Write(userPassword)
+	byteslice := hash.Sum(nil)
+	hashedUserPassword := strings.ToUpper(hex.EncodeToString(byteslice))
+	beginningOfHashedUserPassword := hashedUserPassword[:5]
 
-	firstPart := hexHash[:5]
-
-	response, err := http.Get("https://api.pwnedpasswords.com/range/" + firstPart)
-
+	// Get all matching hashes from "have i been pwned".
+	// https://haveibeenpwned.com/API/v2 (Searching by range)
+	response, err := http.Get("https://api.pwnedpasswords.com/range/" + beginningOfHashedUserPassword)
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
-	hashArray := strings.Split(string(body), "\n")
+	passwordHashesInDatabase := strings.Split(string(body), "\r\n")
 
-	for _, b := range hashArray {
-		hashes := strings.Split(b, ":")
+	// Check received hashes against full user password hash
+	amount := checkForMatch(hashedUserPassword, passwordHashesInDatabase)
+	if amount == "none" {
+		fmt.Println("This password has not been found in any data breaches and is safe to use.")
+	} else {
+		fmt.Printf("This password was found %s times in data breaches.", amount)
+		fmt.Println()
+	}
+}
 
-		if firstPart+hashes[0] == hexHash {
-			fmt.Printf("This password was found %s times in data breaches", strings.TrimSuffix(hashes[1], "\r"))
-			break
+func checkForMatch(hashedUserPassword string, passwordHashesInDatabase []string) string {
+	for _, passwordHashInDatabase := range passwordHashesInDatabase {
+		hashInDatabase := strings.Split(passwordHashInDatabase, ":")
+
+		if hashedUserPassword[:5]+hashInDatabase[0] == hashedUserPassword {
+			return hashInDatabase[1]
 		}
 	}
+	return "none"
 }
